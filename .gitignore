@@ -1,0 +1,44 @@
+# Laravel 10.x
+
+# Ignore the local environment file
+.env
+
+# Ignore the Composer vendor directory
+/vendor/
+
+# Ignore Node.js dependencies
+/node_modules/
+
+# Ignore compiled files
+/bootstrap/cache/
+/storage/*.key
+/storage/framework/cache/data/*
+/storage/framework/sessions/*
+/storage/framework/testing/
+/storage/framework/views/*
+/storage/logs/*
+
+# Ignore IDE specific files
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Ignore debug logs
+*.log
+
+# Ignore compiled assets
+/public/hot
+/public/storage
+/public/js/
+/public/css/
+
+# Ignore local environment files
+.env.*.local
+.env.local
+.env.backup
+.phpunit.result.cache
+
+# Ignore npm and composer lock files (optional, but recommended for deployment)
+# package-lock.json
+# composer.lock
