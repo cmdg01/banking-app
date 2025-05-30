@@ -111,7 +111,12 @@
             const handler = Plaid.create({
                 token: linkToken,
                 onSuccess: function(public_token, metadata) {
-                    // Send the public token and metadata to the server
+                    console.log('Plaid Link success', {
+                        public_token: public_token,
+                        metadata: metadata
+                    });
+                    
+                    // Send the public token and account_id to the server
                     const form = document.createElement('form');
                     form.method = 'POST';
                     form.action = '{{ route("banks.store") }}';
@@ -122,11 +127,19 @@
                     tokenInput.value = public_token;
                     form.appendChild(tokenInput);
                     
-                    const metadataInput = document.createElement('input');
-                    metadataInput.type = 'hidden';
-                    metadataInput.name = 'metadata';
-                    metadataInput.value = JSON.stringify(metadata);
-                    form.appendChild(metadataInput);
+                    // Extract the selected account ID from metadata
+                    const accountInput = document.createElement('input');
+                    accountInput.type = 'hidden';
+                    accountInput.name = 'account_id';
+                    
+                    // Plaid Link returns the selected account ID in different formats depending on the flow
+                    if (metadata.account_id) {
+                        accountInput.value = metadata.account_id;
+                    } else if (metadata.accounts && metadata.accounts.length > 0) {
+                        // If multiple accounts were selected, use the first one
+                        accountInput.value = metadata.accounts[0].id;
+                    }
+                    form.appendChild(accountInput);
                     
                     // Add CSRF token
                     const csrfToken = document.createElement('input');

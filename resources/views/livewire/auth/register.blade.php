@@ -1,10 +1,10 @@
 <?php
 
 use App\Models\User;
-use App\Services\DwollaService;
-use App\Services\DirectDwollaService;
+use App\Services\DirectDwollaService; // Assuming DirectDwollaService is the one being used
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB; // Added for database transactions
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rules;
@@ -16,7 +16,7 @@ new #[Layout('components.layouts.auth')] class extends Component {
     public string $email = '';
     public string $password = '';
     public string $password_confirmation = '';
-    
+
     // Additional fields for Dwolla
     public string $first_name = '';
     public string $last_name = '';
@@ -27,6 +27,9 @@ new #[Layout('components.layouts.auth')] class extends Component {
     public string $postal_code = '';
     public string $date_of_birth = '';
     public string $ssn = '';
+
+    // Property to hold registration error messages
+    public string $registrationError = '';
 
     /**
      * Handle an incoming registration request.
@@ -48,45 +51,76 @@ new #[Layout('components.layouts.auth')] class extends Component {
             'ssn' => ['required', 'string', 'size:9'],
         ]);
 
-        $validated['password'] = Hash::make($validated['password']);
-        
-        // Create the user
-        $user = User::create($validated);
-        
-        // Create Dwolla customer - but don't stop registration if it fails
+        // Clear any previous registration errors
+        $this->registrationError = '';
+
         try {
-            $dwollaService = new \App\Services\DirectDwollaService();
-            Log::info('Attempting to create Dwolla customer for newly registered user', [
-                'user_id' => $user->id,
-                'email' => $user->email
-            ]);
-            
-            // Create customer in Dwolla
-            $customerData = $dwollaService->createCustomer($user);
-            
-            // Update user with Dwolla information
-            $user->dwolla_customer_id = $customerData['customer_id'];
-            $user->dwolla_customer_url = $customerData['customer_url'];
-            $user->save();
-            
-            Log::info('Successfully created Dwolla customer for user', [
-                'user_id' => $user->id,
-                'dwolla_customer_id' => $customerData['customer_id'] 
-            ]);
+            $validated['password'] = Hash::make($validated['password']);
+
+            // Start database transaction
+            DB::beginTransaction();
+
+            // Create the user
+            $user = User::create($validated);
+
+            // Create Dwolla customer
+            try {
+                $dwollaService = new \App\Services\DirectDwollaService();
+                Log::info('Attempting to create Dwolla customer for newly registered user', [
+                    'user_id' => $user->id,
+                    'email' => $user->email
+                ]);
+
+                // Create customer in Dwolla
+                $customerData = $dwollaService->createCustomer($user); // Assuming createCustomer now takes the validated data or user object
+
+                // Update user with Dwolla information
+                $user->dwolla_customer_id = $customerData['customer_id'];
+                $user->dwolla_customer_url = $customerData['customer_url'];
+                $user->save();
+
+                Log::info('Successfully created Dwolla customer for user', [
+                    'user_id' => $user->id,
+                    'dwolla_customer_id' => $customerData['customer_id']
+                ]);
+
+                // Commit the transaction if everything is successful
+                DB::commit();
+
+            } catch (\Exception $e) {
+                // Rollback the transaction if Dwolla customer creation or user update fails
+                DB::rollBack();
+
+                Log::error('Failed to create Dwolla customer or update user during registration: ' . $e->getMessage(), [
+                    'user_id' => $user->id ?? null, // User ID might exist if creation was successful but Dwolla part failed
+                    'trace' => $e->getTraceAsString()
+                ]);
+
+                // Set a user-friendly error message, including the specific error if desired
+                $this->registrationError = 'Failed to finalize your account setup with our payment processor. Please try again or contact support. Error details: ' . $e->getMessage();
+                return; // Stop further execution
+            }
+
+            event(new Registered($user));
+
+            Auth::login($user);
+
+            $this->redirectIntended(route('dashboard', absolute: false), navigate: true);
+
         } catch (\Exception $e) {
-            Log::error('Failed to create Dwolla customer during registration: ' . $e->getMessage(), [
-                'user_id' => $user->id
+            // Rollback the transaction if any other part of the registration fails (e.g., user creation itself)
+            DB::rollBack(); // Ensure rollback is called if transaction was started
+
+            Log::error('Registration failed: ' . $e->getMessage(), [
+                'email' => $validated['email'] ?? 'N/A', // Log email if available
+                'trace' => $e->getTraceAsString()
             ]);
-            // Continue with registration despite Dwolla API failure
+
+            $this->registrationError = 'Registration failed due to an unexpected error. Please try again. If the problem persists, contact support.';
+            // No return here, Livewire will re-render and show the error
         }
-
-        event(new Registered($user));
-
-        Auth::login($user);
-
-        $this->redirectIntended(route('dashboard', absolute: false), navigate: true);
     }
-}; 
+};
 ?>
 
 <div class="flex flex-col gap-6">
@@ -94,13 +128,17 @@ new #[Layout('components.layouts.auth')] class extends Component {
         :title="__('Create your banking account')" 
         :description="__('Enter your details below to create your banking account')" 
     />
+
+    @if ($registrationError)
+        <div class="p-4 mb-4 text-sm text-red-800 rounded-lg bg-red-50 dark:bg-gray-800 dark:text-red-400" role="alert">
+            {{ $registrationError }}
+        </div>
+    @endif
     
-    <!-- Session Status -->
     <x-auth-session-status class="text-center" :status="session('status')" />
     
     <form wire:submit="register" class="flex flex-col gap-6">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <!-- Name -->
             <flux:input
                 wire:model="name"
                 :label="__('Name')"
@@ -111,7 +149,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
                 :placeholder="__('Full name')"
             />
             
-            <!-- Email Address -->
             <flux:input
                 wire:model="email"
                 :label="__('Email address')"
@@ -123,7 +160,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
         </div>
         
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <!-- First Name -->
             <flux:input
                 wire:model="first_name"
                 :label="__('First name')"
@@ -133,7 +169,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
                 :placeholder="__('First name')"
             />
             
-            <!-- Last Name -->
             <flux:input
                 wire:model="last_name"
                 :label="__('Last name')"
@@ -144,7 +179,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
             />
         </div>
         
-        <!-- Address Line 1 -->
         <flux:input
             wire:model="address_line_1"
             :label="__('Address line 1')"
@@ -154,7 +188,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
             :placeholder="__('Street address')"
         />
         
-        <!-- Address Line 2 -->
         <flux:input
             wire:model="address_line_2"
             :label="__('Address line 2 (optional)')"
@@ -164,7 +197,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
         />
         
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <!-- City -->
             <flux:input
                 wire:model="city"
                 :label="__('City')"
@@ -174,7 +206,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
                 :placeholder="__('City')"
             />
             
-            <!-- State -->
             <flux:input
                 wire:model="state"
                 :label="__('State')"
@@ -185,7 +216,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
                 :placeholder="__('State (e.g. CA)')"
             />
             
-            <!-- Postal Code -->
             <flux:input
                 wire:model="postal_code"
                 :label="__('Postal code')"
@@ -197,7 +227,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
         </div>
         
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <!-- Date of Birth -->
             <flux:input
                 wire:model="date_of_birth"
                 :label="__('Date of birth')"
@@ -207,11 +236,10 @@ new #[Layout('components.layouts.auth')] class extends Component {
                 :helper="__('You must be at least 18 years old')"
             />
             
-            <!-- SSN -->
             <flux:input
                 wire:model="ssn"
                 :label="__('Social Security Number')"
-                type="password"
+                type="password" 
                 required
                 maxlength="9"
                 :helper="__('9 digits, no dashes')"
@@ -219,7 +247,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
         </div>
         
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <!-- Password -->
             <flux:input
                 wire:model="password"
                 :label="__('Password')"
@@ -230,7 +257,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
                 viewable
             />
             
-            <!-- Confirm Password -->
             <flux:input
                 wire:model="password_confirmation"
                 :label="__('Confirm password')"

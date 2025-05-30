@@ -180,8 +180,14 @@ class DirectDwollaService
     
     /**
      * Create a funding source using a Plaid processor token
+     * 
+     * @param string $customerUrl The customer's URL from Dwolla
+     * @param string $processorToken The processor token from Plaid
+     * @param string $name Name for the funding source
+     * @param string $type Type of account (checking or savings)
+     * @return array Created funding source data
      */
-    public function createFundingSourceWithProcessorToken(string $customerUrl, string $processorToken, string $bankName)
+    public function createFundingSource(string $customerUrl, string $processorToken, string $name, string $type = 'checking')
     {
         try {
             // Get access token
@@ -190,8 +196,20 @@ class DirectDwollaService
             // Prepare request data
             $data = [
                 'plaidToken' => $processorToken,
-                'name' => $bankName,
+                'name' => $name,
             ];
+            
+            // Add account type if provided
+            if (in_array(strtolower($type), ['checking', 'savings'])) {
+                $data['channels'] = [strtoupper($type)];
+            }
+            
+            // Log the request (excluding sensitive data)
+            Log::info('Creating Dwolla funding source', [
+                'customer_url' => $customerUrl,
+                'name' => $name,
+                'type' => $type
+            ]);
             
             // Make the API request
             $client = new Client();
@@ -212,11 +230,21 @@ class DirectDwollaService
                 throw new Exception('No funding source URL in Dwolla response');
             }
             
+            // Extract funding source ID from URL
+            $segments = explode('/', $fundingSourceUrl);
+            $fundingSourceId = end($segments);
+            
             Log::info('Dwolla funding source created successfully', [
+                'funding_source_id' => $fundingSourceId,
                 'funding_source_url' => $fundingSourceUrl
             ]);
             
-            return $fundingSourceUrl;
+            return [
+                'id' => $fundingSourceId,
+                'url' => $fundingSourceUrl,
+                'status' => 'pending' // Initial status
+            ];
+            
         } catch (\GuzzleHttp\Exception\RequestException $e) {
             $errorMessage = $e->getMessage();
             $responseBody = '';
@@ -235,29 +263,149 @@ class DirectDwollaService
                 }
             }
             
-            Log::error('Dwolla API error creating funding source: ' . $errorMessage, [
-                'response_body' => $responseBody
+            Log::error('Dwolla funding source creation failed: ' . $errorMessage, [
+                'response_body' => $responseBody,
+                'customer_url' => $customerUrl
             ]);
             
-            throw new Exception('Failed to link bank account: ' . $errorMessage);
+            throw new Exception('Failed to create funding source: ' . $errorMessage);
+            
+        } catch (\Exception $e) {
+            Log::error('Error creating Dwolla funding source: ' . $e->getMessage());
+            throw new Exception('Failed to create funding source: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Alias for createFundingSource for backward compatibility
+     */
+    public function createFundingSourceWithProcessorToken(string $customerUrl, string $processorToken, string $bankName)
+    {
+        return $this->createFundingSource($customerUrl, $processorToken, $bankName);
+    }
+
+    /**
+     * Create a funding source for a customer using a processor token
+     * 
+     * @param string $customerUrl The customer's URL from Dwolla
+     * @param string $processorToken The processor token from Plaid
+     * @param string $name Name for the funding source
+     * @param string $type Type of account (checking or savings)
+     * @return array Created funding source data
+     */
+    public function createFundingSourceForCustomer(string $customerUrl, string $processorToken, string $name, string $type = 'checking')
+    {
+        try {
+            // Get access token
+            $accessToken = $this->getAccessToken();
+            
+            // Prepare request data
+            $data = [
+                'plaidToken' => $processorToken,
+                'name' => $name,
+            ];
+            
+            // Add account type if provided
+            if (in_array(strtolower($type), ['checking', 'savings'])) {
+                $data['channels'] = [strtoupper($type)];
+            }
+            
+            // Log the request (excluding sensitive data)
+            Log::info('Creating Dwolla funding source', [
+                'customer_url' => $customerUrl,
+                'name' => $name,
+                'type' => $type
+            ]);
+            
+            // Make the API request
+            $client = new Client();
+            $response = $client->post($customerUrl . '/funding-sources', [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $accessToken,
+                    'Content-Type' => 'application/vnd.dwolla.v1.hal+json',
+                    'Accept' => 'application/vnd.dwolla.v1.hal+json'
+                ],
+                'json' => $data,
+                'verify' => false // For development only
+            ]);
+            
+            // Get funding source URL from Location header
+            $fundingSourceUrl = $response->getHeader('Location')[0] ?? null;
+            
+            if (empty($fundingSourceUrl)) {
+                throw new Exception('No funding source URL in Dwolla response');
+            }
+            
+            // Extract funding source ID from URL
+            $segments = explode('/', $fundingSourceUrl);
+            $fundingSourceId = end($segments);
+            
+            Log::info('Dwolla funding source created successfully', [
+                'funding_source_id' => $fundingSourceId,
+                'funding_source_url' => $fundingSourceUrl
+            ]);
+            
+            return [
+                'id' => $fundingSourceId,
+                'url' => $fundingSourceUrl,
+                'status' => 'pending' // Initial status
+            ];
+            
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            $errorMessage = $e->getMessage();
+            $responseBody = '';
+            
+            if ($e->hasResponse()) {
+                $response = $e->getResponse();
+                $responseBody = (string) $response->getBody();
+                
+                try {
+                    $errorData = json_decode($responseBody, true);
+                    if (isset($errorData['_embedded']['errors'][0]['message'])) {
+                        $errorMessage = $errorData['_embedded']['errors'][0]['message'];
+                    }
+                } catch (\Exception $jsonEx) {
+                    // Just use the original error message
+                }
+            }
+            
+            Log::error('Dwolla funding source creation failed: ' . $errorMessage, [
+                'response_body' => $responseBody,
+                'customer_url' => $customerUrl
+            ]);
+            
+            throw new Exception('Failed to create funding source: ' . $errorMessage);
+            
+        } catch (\Exception $e) {
+            Log::error('Error creating Dwolla funding source: ' . $e->getMessage());
+            throw new Exception('Failed to create funding source: ' . $e->getMessage());
         }
     }
 
     /**
     * Initiate a transfer between funding sources
-    * * @param string $sourceUrl The funding source URL to transfer from
-    * @param string $destinationUrl The funding source URL to transfer to
+    * @param string $sourceUrl The funding source URL or ID to transfer from
+    * @param string $destinationUrl The funding source URL or ID to transfer to
     * @param float $amount The amount to transfer
+    * @param string $note Optional note for the transfer
     * @param string $currency The currency code (default: USD)
-    * @param array $metadata Optional metadata for the transfer
     * @return array Transfer details including id and status
     * @throws Exception
     */
-    public function createTransfer($sourceUrl, $destinationUrl, $amount, $currency = 'USD', $metadata = [])
+    public function createTransfer($sourceUrl, $destinationUrl, $amount, $note = null, $currency = 'USD')
     {
         try {
             // Get access token
             $accessToken = $this->getAccessToken();
+            
+            // Check if we have full URLs or just IDs
+            if (strpos($sourceUrl, 'http') !== 0) {
+                $sourceUrl = $this->baseUrl . '/funding-sources/' . $sourceUrl;
+            }
+            
+            if (strpos($destinationUrl, 'http') !== 0) {
+                $destinationUrl = $this->baseUrl . '/funding-sources/' . $destinationUrl;
+            }
             
             // Prepare transfer data
             $transferData = [
@@ -275,17 +423,16 @@ class DirectDwollaService
                 ]
             ];
             
-            // Add metadata if provided
-            if (!empty($metadata)) {
-                $transferData['metadata'] = $metadata;
-            }
+            // Note: Removed metadata as it's not supported for this transfer type
+            // If you need to include notes, consider using the transfer's description field instead
             
             // Log the transfer request
             Log::info('Initiating Dwolla transfer', [
-                'source' => $sourceUrl,
-                'destination' => $destinationUrl,
+                'source_url' => $sourceUrl,
+                'destination_url' => $destinationUrl,
                 'amount' => $amount,
-                'currency' => $currency
+                'currency' => $currency,
+                'note' => $note
             ]);
             
             // Make the API request
@@ -342,8 +489,8 @@ class DirectDwollaService
             
             Log::error('Dwolla API error creating transfer: ' . $errorMessage, [
                 'response_body' => $responseBody,
-                'source' => $sourceUrl,
-                'destination' => $destinationUrl,
+                'source_url' => $sourceUrl,
+                'destination_url' => $destinationUrl,
                 'amount' => $amount
             ]);
             

@@ -20,7 +20,7 @@ return new class extends Migration
             $table->string('institution_name');
             $table->string('account_name');
             $table->string('account_type');
-            $table->string('account_mask', 4);
+            $table->string('account_mask')->nullable()->default(null);
             $table->string('dwolla_funding_source_url')->nullable();
             $table->timestamps();
             

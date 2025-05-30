@@ -48,19 +48,16 @@ class PlaidService
         }
 
         try {
-            // Prepare the payload with proper type casting
             $payload = [
                 'client_id' => $this->clientId,
                 'secret' => $this->secret,
+                'client_name' => config('app.name', 'Laravel'),
                 'user' => [
                     'client_user_id' => (string) $user->id,
                 ],
-                'client_name' => config('app.name', 'Banking App'), // Ensure app.name is set or provide a default
-                'products' => config('plaid.products', ['auth']), // Ensure this is configured
-                'country_codes' => config('plaid.country_codes', ['US']), // Ensure this is configured
-                'language' => config('plaid.language', 'en'), // Ensure this is configured
-                // 'webhook' => config('plaid.webhook_url'), // Optional: if you use webhooks
-                // 'redirect_uri' => config('plaid.redirect_uri'), // Optional: if using OAuth redirect flow
+                'products' => ['auth', 'transactions'],
+                'country_codes' => ['US'],
+                'language' => 'en',
             ];
 
             // Log the payload for debugging
@@ -101,7 +98,15 @@ class PlaidService
         }
     }
 
-    // ... (rest of your PlaidService methods remain the same as you provided)
+    /**
+     * Exchange a public token for an access token
+     * Alias for exchangePublicTokenForAccessToken for backward compatibility
+     */
+    public function exchangePublicToken(string $publicToken)
+    {
+        return $this->exchangePublicTokenForAccessToken($publicToken);
+    }
+
     /**
      * Exchange a public token for an access token
      */
@@ -228,10 +233,24 @@ class PlaidService
             ]);
 
             $result = json_decode($response->getBody()->getContents(), true);
-            return $result['processor_token'];
+            
+            // Return the full response for better error handling
+            if (!isset($result['processor_token'])) {
+                throw new Exception('No processor token in Plaid response');
+            }
+            
+            return [
+                'processor_token' => $result['processor_token'],
+                'request_id' => $result['request_id'] ?? null
+            ];
+            
         } catch (GuzzleException $e) {
             $responseBody = $e->hasResponse() ? $e->getResponse()->getBody()->getContents() : 'No response body';
-            Log::error('Failed to create Plaid processor token: ' . $e->getMessage(), ['response' => $responseBody]);
+            Log::error('Failed to create Plaid processor token: ' . $e->getMessage(), [
+                'response' => $responseBody,
+                'account_id' => $accountId,
+                'processor' => $processor
+            ]);
             throw new Exception('Failed to prepare bank account for linking: ' . $e->getMessage() . '. Response: ' . substr($responseBody, 0, 200));
         }
     }
@@ -273,6 +292,121 @@ class PlaidService
             $responseBody = $e->hasResponse() ? $e->getResponse()->getBody()->getContents() : 'No response body';
             Log::error('Failed to get Plaid transactions: ' . $e->getMessage(), ['response' => $responseBody]);
             throw new Exception('Failed to retrieve transactions: ' . $e->getMessage() . '. Response: ' . substr($responseBody, 0, 200));
+        }
+    }
+
+    /**
+     * Get account balance for a specific account
+     * 
+     * @param string $accessToken The Plaid access token
+     * @param string|null $accountId Optional account ID to filter by
+     * @return array The account balance data
+     */
+    public function getAccountBalance(string $accessToken, ?string $accountId = null)
+    {
+        try {
+            $payload = [
+                'client_id' => $this->clientId,
+                'secret' => $this->secret,
+                'access_token' => $accessToken,
+                'options' => [
+                    'account_ids' => [$accountId]
+                ]
+            ];
+
+            // Log the request payload
+            Log::debug('Plaid Balance Request', [
+                'endpoint' => '/accounts/balance/get',
+                'payload' => $payload
+            ]);
+
+            $response = $this->client->post('/accounts/balance/get', [
+                'json' => $payload,
+                'http_errors' => false // Don't throw exceptions for 4xx/5xx responses
+            ]);
+
+            $statusCode = $response->getStatusCode();
+            $result = json_decode($response->getBody()->getContents(), true);
+
+            // Log the full response
+            Log::debug('Plaid Balance Response', [
+                'status_code' => $statusCode,
+                'response' => $result
+            ]);
+
+            if ($statusCode !== 200) {
+                throw new Exception($result['error_message'] ?? 'Failed to fetch account balance');
+            }
+
+            if (empty($result['accounts'])) {
+                Log::warning('No accounts found in Plaid response');
+                return [
+                    'available' => null,
+                    'current' => null,
+                    'limit' => null,
+                    'iso_currency_code' => 'USD',
+                    'raw_response' => $result
+                ];
+            }
+
+            $account = $result['accounts'][0];
+            
+            return [
+                'available' => $account['balances']['available'] ?? null,
+                'current' => $account['balances']['current'] ?? null,
+                'limit' => $account['balances']['limit'] ?? null,
+                'iso_currency_code' => $account['balances']['iso_currency_code'] ?? 'USD',
+                'raw_response' => $result
+            ];
+            
+        } catch (\Exception $e) {
+            Log::error('Error in getAccountBalance', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'account_id' => $accountId
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Sync transactions for an account using the transactions/sync endpoint
+     * This is the newer, more efficient way to get transactions compared to transactions/get
+     * 
+     * @param string $accessToken The Plaid access token
+     * @param string|null $cursor The pagination cursor from a previous sync
+     * @return array The sync response with added, modified, and removed transactions
+     */
+    public function syncTransactions(string $accessToken, ?string $cursor = null)
+    {
+        try {
+            $payload = [
+                'client_id' => $this->clientId,
+                'secret' => $this->secret,
+                'access_token' => $accessToken,
+            ];
+            
+            // Add cursor if provided for pagination
+            if ($cursor) {
+                $payload['cursor'] = $cursor;
+            }
+
+            $response = $this->client->post('/transactions/sync', [
+                'json' => $payload,
+            ]);
+
+            $result = json_decode($response->getBody()->getContents(), true);
+            return [
+                'added' => $result['added'],
+                'modified' => $result['modified'],
+                'removed' => $result['removed'],
+                'next_cursor' => $result['next_cursor'],
+                'has_more' => $result['has_more'],
+            ];
+        } catch (GuzzleException $e) {
+            $responseBody = $e->hasResponse() ? $e->getResponse()->getBody()->getContents() : 'No response body';
+            Log::error('Failed to sync Plaid transactions: ' . $e->getMessage(), ['response' => $responseBody]);
+            throw new Exception('Failed to sync transactions: ' . $e->getMessage() . '. Response: ' . substr($responseBody, 0, 200));
         }
     }
 }

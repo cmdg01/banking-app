@@ -14,13 +14,16 @@ class DashboardController extends Controller
     public function index()
     {
         $user = Auth::user();
-        $banks = $user->banks;
+        $banks = $user->banks()->with('transactions')->get();
         
-        // Get total balance (assuming we store balance in bank model, or calculate from transactions)
-        $totalBalance = 0;
+        // Calculate total balance from all connected bank accounts
+        $totalBalance = $banks->sum(function($bank) {
+            return $bank->balance_current ?? 0;
+        });
         
-        // Get recent transactions
+        // Get recent transactions across all accounts
         $recentTransactions = Transaction::where('user_id', $user->id)
+            ->with('bank')
             ->orderBy('date', 'desc')
             ->limit(10)
             ->get();
@@ -31,6 +34,6 @@ class DashboardController extends Controller
         // Count recent transactions
         $recentTransactionCount = $recentTransactions->count();
             
-        return view('dashboard.index', compact('banks', 'totalBalance', 'recentTransactions', 'linkedAccounts', 'recentTransactionCount'));
+        return view('dashboard', compact('banks', 'totalBalance', 'recentTransactions', 'linkedAccounts', 'recentTransactionCount'));
     }
 }

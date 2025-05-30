@@ -118,67 +118,110 @@
         const chatForm = document.getElementById('chat-form');
         const quickActions = document.querySelectorAll('.quick-action');
         
-        // Hardcoded responses for different intents
-        const responses = {
-            greeting: [
-                "Hello! How can I assist you with your finances today?",
-                "Hi there! What financial questions do you have?",
-                "Welcome back! How can I help you manage your money today?"
-            ],
-            budget: [
-                "To create a budget, start by tracking your income and expenses. Would you like me to help you set up a monthly budget?",
-                "A good rule is the 50/30/20 budget: 50% needs, 30% wants, 20% savings. Would you like me to help you calculate this?",
-                "Let's review your spending patterns to create an effective budget. What are your main expense categories?"
-            ],
-            expense: [
-                "To track expenses, categorize each purchase and review weekly. Would you like me to show you some expense tracking tools?",
-                "I can help you analyze your spending. Which category would you like to review? (e.g., food, transportation, entertainment)",
-                "Consider using the 30-day rule for non-essential purchases to reduce unnecessary spending."
-            ],
-            savings: [
-                "A good savings goal is to have 3-6 months of living expenses. Would you like help setting up a savings plan?",
-                "Try the 52-week savings challenge to gradually build your emergency fund.",
-                "Automating your savings can help you reach your goals faster. Would you like to know more about automatic transfers?"
-            ],
-            investment: [
-                "For beginners, consider low-cost index funds as they provide good diversification.",
-                "It's important to understand your risk tolerance before investing. Would you like to take a quick risk assessment?",
-                "Diversification is key to managing investment risk. Consider spreading your investments across different asset classes."
-            ],
-            default: [
-                "I'm here to help with your financial questions. Could you please rephrase or ask about budgeting, expenses, or savings?",
-                "I'm not sure I understand. Could you tell me more about what you'd like to know?",
-                "I can help with budgeting, expense tracking, and savings goals. What would you like to know more about?"
-            ]
-        };
-
-        // Quick action responses
-        const quickActionResponses = {
-            create_budget: "Let's create a budget! First, what's your monthly take-home pay after taxes?",
-            track_expense: "I can help you track expenses. Would you like to log a new expense or view your spending history?",
-            savings_goal: "Setting savings goals is important! What are you saving for? (e.g., emergency fund, vacation, house)",
-            spending_analysis: "Let's analyze your spending. Would you like to see your spending by category or over time?"
-        };
-
-        // Function to get a random response based on intent
-        function getResponse(intent) {
-            const responseArray = responses[intent] || responses['default'];
-            return responseArray[Math.floor(Math.random() * responseArray.length)];
-        }
-
-        // Function to determine intent from user message
-        function getIntent(message) {
-            const lowerMsg = message.toLowerCase();
+        // Function to send a message
+        function sendMessage() {
+            const message = userInput.value.trim();
+            if (message === '') return;
             
-            if (/(hi|hello|hey|greetings)/i.test(lowerMsg)) return 'greeting';
-            if (/(budget|spending limit|money plan)/i.test(lowerMsg)) return 'budget';
-            if (/(expense|spending|purchase|transaction)/i.test(lowerMsg)) return 'expense';
-            if (/(sav|emergency fund|set aside|put away)/i.test(lowerMsg)) return 'savings';
-            if (/(invest|stock|bond|portfolio|market)/i.test(lowerMsg)) return 'investment';
+            // Add user message to chat
+            addMessage(message, true);
+            userInput.value = '';
             
-            return null;
+            // Show typing indicator
+            showTypingIndicator();
+            
+            // Send message to server
+            fetch('{{ route("chat.send") }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ message: message })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Hide typing indicator
+                hideTypingIndicator();
+                
+                if (data.success) {
+                    // Show AI response
+                    showResponse(data.message);
+                } else {
+                    // Show error message
+                    showErrorMessage(data.message || 'An error occurred');
+                }
+            })
+            .catch(error => {
+                // Hide typing indicator
+                hideTypingIndicator();
+                
+                // Show error message
+                console.error('Error:', error);
+                showErrorMessage('Sorry, there was an error processing your request.');
+            });
         }
-
+        
+        // Function to show typing indicator
+        function showTypingIndicator() {
+            const typingDiv = document.createElement('div');
+            typingDiv.id = 'typing-indicator';
+            typingDiv.className = 'flex items-start gap-3 message';
+            typingDiv.innerHTML = `
+                <div class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center flex-shrink-0 shadow-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-blue-600 dark:text-blue-300" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="bg-gray-100 dark:bg-gray-700 rounded-lg px-4 py-2 max-w-[80%] shadow-sm">
+                    <div class="flex space-x-2">
+                        <div class="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500 animate-pulse"></div>
+                        <div class="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500 animate-pulse" style="animation-delay: 0.2s"></div>
+                        <div class="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500 animate-pulse" style="animation-delay: 0.4s"></div>
+                    </div>
+                </div>
+            `;
+            chatMessages.appendChild(typingDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        // Function to hide typing indicator
+        function hideTypingIndicator() {
+            const typingIndicator = document.getElementById('typing-indicator');
+            if (typingIndicator) {
+                typingIndicator.remove();
+            }
+        }
+        
+        // Function to show error message
+        function showErrorMessage(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'flex items-start gap-3 message';
+            errorDiv.innerHTML = `
+                <div class="w-8 h-8 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center flex-shrink-0 shadow-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-red-600 dark:text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="bg-red-50 dark:bg-red-900/20 rounded-lg px-4 py-2 max-w-[80%] shadow-sm">
+                    <p class="text-sm text-red-800 dark:text-red-200">${message}</p>
+                </div>
+            `;
+            chatMessages.appendChild(errorDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        // Function to show response
+        function showResponse(message) {
+            addMessage(message);
+        }
+        
         // Function to add a message to the chat
         function addMessage(message, isUser = false) {
             const messageDiv = document.createElement('div');
@@ -213,57 +256,82 @@
             return messageDiv;
         }
 
-        // Function to show typing indicator
-        function showTypingIndicator() {
-            const typingIndicator = document.getElementById('typing-indicator');
-            if (typingIndicator) typingIndicator.remove();
-            
-            const newTypingIndicator = document.createElement('div');
-            newTypingIndicator.className = 'flex items-start gap-3';
-            newTypingIndicator.id = 'typing-indicator';
-            newTypingIndicator.innerHTML = `
-                <div class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center flex-shrink-0 shadow-sm">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-blue-600 dark:text-blue-300" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z" clip-rule="evenodd" />
-                    </svg>
-                </div>
-                <div class="bg-blue-50 dark:bg-gray-700 rounded-2xl rounded-tl-none px-4 py-3 max-w-[85%] shadow-sm">
-                    <div class="typing-dots flex space-x-1">
-                        <span></span>
-                        <span></span>
-                        <span></span>
-                    </div>
-                </div>
-            `;
-            
-            chatMessages.appendChild(newTypingIndicator);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-            return newTypingIndicator;
-        }
-
-        // Function to simulate typing and show response
-        function showResponse(message) {
-            const typingIndicator = showTypingIndicator();
-            
-            // Simulate typing delay
-            setTimeout(() => {
-                typingIndicator.remove();
-                addMessage(message, false);
-            }, 1000);
-        }
-
         // Handle quick action buttons
         quickActions.forEach(button => {
             button.addEventListener('click', function() {
                 const action = this.getAttribute('data-action');
-                const response = quickActionResponses[action] || "I'm not sure how to help with that. Could you ask in a different way?";
-                showResponse(response);
+                console.log('Quick action clicked:', action);
+                
+                // Add user message based on the action
+                let userMessage = '';
+                switch(action) {
+                    case 'create_budget':
+                        userMessage = "I want to create a budget";
+                        break;
+                    case 'track_expense':
+                        userMessage = "I need to track my expenses";
+                        break;
+                    case 'savings_goal':
+                        userMessage = "Help me set a savings goal";
+                        break;
+                    case 'spending_analysis':
+                        userMessage = "Analyze my spending patterns";
+                        break;
+                    default:
+                        userMessage = "I need help with my finances";
+                }
+                
+                // Add user message to chat
+                addMessage(userMessage, true);
+                
+                // Show typing indicator
+                showTypingIndicator();
+                
+                // Send message to server
+                fetch('{{ route("chat.send") }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ message: userMessage })
+                })
+                .then(response => {
+                    console.log('Response status:', response.status);
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Response data:', data);
+                    // Hide typing indicator
+                    hideTypingIndicator();
+                    
+                    if (data.success) {
+                        // Show AI response
+                        showResponse(data.message);
+                    } else {
+                        // Show error message
+                        showErrorMessage(data.message || 'An error occurred');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    // Hide typing indicator
+                    hideTypingIndicator();
+                    
+                    // Show error message
+                    showErrorMessage('Sorry, there was an error processing your request.');
+                });
             });
         });
 
         // Handle form submission
         chatForm.addEventListener('submit', function(e) {
             e.preventDefault(); // Prevent default form submission
+            console.log('Form submitted');
             sendMessage();
         });
 
@@ -274,25 +342,6 @@
                 sendMessage();
             }
         });
-
-        // Function to send a message
-        function sendMessage() {
-            const message = userInput.value.trim();
-            if (message === '') return;
-            
-            // Add user message to chat
-            addMessage(message, true);
-            userInput.value = '';
-            
-            // Determine intent and get response
-            const intent = getIntent(message);
-            const response = intent ? getResponse(intent) : getResponse('default');
-            
-            // Show response after a short delay
-            setTimeout(() => {
-                showResponse(response);
-            }, 500);
-        }
     });
     </script>
     <style>

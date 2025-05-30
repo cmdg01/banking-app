@@ -26,8 +26,14 @@
                     <flux:navlist.item icon="arrows-right-left" :href="route('transfers.index')" :current="request()->routeIs('transfers.*')" wire:navigate>
                         {{ __('Transfers') }}
                     </flux:navlist.item>
-                    <flux:navlist.item icon="chat-bubble-left-right" :href="route('chat.index')" :current="request()->routeIs('chat.*')" wire:navigate>
-                        {{ __('AI Chat') }}
+                    <flux:navlist.item icon="sparkles" :href="route('insights')" :current="request()->routeIs('insights')" wire:navigate>
+                        {{ __('Insights') }}
+                    </flux:navlist.item>
+                    <flux:navlist.item icon="chat-bubble-left-right" :href="route('chat')" :current="request()->routeIs('chat.*')" wire:navigate>
+                        {{ __('Chat') }}
+                    </flux:navlist.item>
+                    <flux:navlist.item icon="exclamation-triangle" :href="route('anomalies.index')" :current="request()->routeIs('anomalies.*')" wire:navigate>
+                        {{ __('Anomaly Detection') }}
                     </flux:navlist.item>
                 </flux:navlist.group>
             </flux:navlist>
@@ -36,7 +42,7 @@
 
             <flux:navlist variant="outline" class="mb-4">
                 <flux:navlist.group :heading="__('Quick Actions')" class="grid">
-                    <flux:navlist.item icon="plus-circle" :href="route('banks.create')" wire:navigate>
+                    <flux:navlist.item icon="plus-circle" :href="route('banks.create')">
                         {{ __('Add Bank Account') }}
                     </flux:navlist.item>
                     <flux:navlist.item icon="arrow-right-circle" :href="route('transfers.create')" wire:navigate>

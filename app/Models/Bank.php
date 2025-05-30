@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Bank extends Model
 {
@@ -25,6 +26,12 @@ class Bank extends Model
         'account_type',
         'account_mask',
         'dwolla_funding_source_url',
+        'plaid_cursor',
+        'last_synced_at',
+        'balance_available',
+        'balance_current',
+        'balance_limit',
+        'balance_currency',
     ];
 
     /**
@@ -34,6 +41,19 @@ class Bank extends Model
      */
     protected $hidden = [
         'plaid_access_token',
+        'plaid_cursor',
+    ];
+
+    /**
+     * The attributes that should be cast.
+     *
+     * @var array<string, string>
+     */
+    protected $casts = [
+        'last_synced_at' => 'datetime',
+        'balance_available' => 'decimal:2',
+        'balance_current' => 'decimal:2',
+        'balance_limit' => 'decimal:2',
     ];
 
     /**
@@ -42,6 +62,14 @@ class Bank extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+    
+    /**
+     * Get the transactions for this bank account.
+     */
+    public function transactions(): HasMany
+    {
+        return $this->hasMany(Transaction::class);
     }
     
     /**

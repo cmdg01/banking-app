@@ -27,6 +27,11 @@ class Transaction extends Model
         'type',
         'payment_meta',
         'channel',
+        'is_reviewed',
+        'is_legitimate',
+        'review_feedback',
+        'reviewed_at',
+        'anomaly_data',
     ];
 
     /**
@@ -38,6 +43,10 @@ class Transaction extends Model
         'date' => 'date',
         'payment_meta' => 'array',
         'amount' => 'decimal:2',
+        'is_reviewed' => 'boolean',
+        'is_legitimate' => 'boolean',
+        'reviewed_at' => 'datetime',
+        'anomaly_data' => 'array',
     ];
 
     /**
